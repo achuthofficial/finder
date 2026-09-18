@@ -143,3 +143,56 @@ test("every mirror failing surfaces a readable error", async () => {
     restore();
   }
 });
+
+test("a timeout and an outage produce different advice", async () => {
+  const original = globalThis.fetch;
+
+  globalThis.fetch = (async () => {
+    const error = new Error("The operation was aborted");
+    error.name = "AbortError";
+    throw error;
+  }) as typeof fetch;
+  try {
+    // A timeout is the user's area being too big, so say that and not "try later".
+    await assert.rejects(() => searchOsm(12.97, 77.59, 8000, []), /too large or too busy/i);
+  } finally {
+    globalThis.fetch = original;
+  }
+
+  globalThis.fetch = (async () => new Response("down", { status: 503 })) as typeof fetch;
+  try {
+    await assert.rejects(() => searchOsm(-22.9, -43.2, 800, []), /unavailable right now/i);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("each mirror is told a deadline it can actually meet", async () => {
+  const original = globalThis.fetch;
+  const declared: number[] = [];
+
+  globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
+    const body = new URLSearchParams(String(init.body));
+    declared.push(Number(/\[timeout:(\d+)\]/.exec(body.get("data") ?? "")?.[1]));
+    return new Response("busy", { status: 429 });
+  }) as unknown as typeof fetch;
+
+  try {
+    await assert.rejects(() => searchOsm(55.75, 37.62, 900, []));
+    assert.ok(declared.length >= 2, "a busy mirror should fail over to the next");
+    // Every attempt must promise to finish inside the budget we allowed it.
+    assert.ok(
+      declared.every((seconds) => seconds >= 10 && seconds <= 50),
+      `declared timeouts out of range: ${declared.join(", ")}`,
+    );
+    // A mirror that refuses instantly costs almost no wall clock, so the
+    // reserve held back for it is released: the next attempt gets at least as
+    // long, rather than being punished for the first one's failure.
+    assert.ok(
+      declared[declared.length - 1] >= declared[0],
+      `a fast failure should not shrink the next budget: ${declared.join(", ")}`,
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});

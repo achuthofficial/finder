@@ -11,7 +11,12 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const MIN_RADIUS = 200;
-const MAX_RADIUS = 15_000;
+/**
+ * An all-categories search over a dense city is expensive for Overpass, and
+ * past this the free service starts timing out rather than answering. Better a
+ * smaller area that works than a bigger one that 504s.
+ */
+const MAX_RADIUS = 8_000;
 
 function statsFor(businesses: Business[]): SearchStats {
   const noWebsite = businesses.filter((b) => b.presence === "none").length;
@@ -48,6 +53,7 @@ export async function GET(request: Request) {
   const radius = Number.isFinite(requested)
     ? Math.min(Math.max(requested, MIN_RADIUS), MAX_RADIUS)
     : 1500;
+  const clamped = Number.isFinite(requested) && requested > MAX_RADIUS;
 
   const groups = parseGroups(params.get("groups"));
   const source = params.get("source") === "google" ? "google" : "osm";
@@ -79,7 +85,11 @@ export async function GET(request: Request) {
       source,
       truncated: result.truncated,
       elapsedMs: Date.now() - started,
-      notice: result.notice,
+      notice:
+        result.notice ??
+        (clamped
+          ? `Searched the closest ${(MAX_RADIUS / 1000).toFixed(0)} km — a wider area than that is more than the free map data service will answer.`
+          : undefined),
     };
 
     return NextResponse.json(payload, {

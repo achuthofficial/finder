@@ -43,34 +43,61 @@ interface OverpassResponse {
 
 const cache = new TtlCache<Business[]>(10 * 60_000);
 
-function selectorsFor(groups: CategoryGroup[]): string[] {
-  const defs = groups.length
-    ? GROUPS.filter((g) => groups.includes(g.id))
-    : GROUPS;
+/**
+ * Collapse the requested groups into one selector per tag key.
+ *
+ * This matters a great deal. Written the obvious way — one `nwr` statement per
+ * `key=value` pair — a full search is 44 statements, and Overpass runs a
+ * separate spatial scan for each one. Over a dense city at a 10 km radius that
+ * reliably times out. Grouping the values of a key into a single regex turns
+ * those 44 scans into about 7.
+ */
+export function selectorsFor(groups: CategoryGroup[]): string[] {
+  const defs = groups.length ? GROUPS.filter((g) => groups.includes(g.id)) : GROUPS;
 
-  const selectors = new Set<string>();
+  const bareKeys = new Set<string>();
+  const valuesByKey = new Map<string, Set<string>>();
+
   for (const def of defs) {
     for (const filter of def.osm) {
       if (filter.includes("=")) {
         const [key, value] = filter.split("=");
-        selectors.add(`["${key}"="${value}"]`);
+        const values = valuesByKey.get(key) ?? new Set<string>();
+        values.add(value);
+        valuesByKey.set(key, values);
       } else {
-        selectors.add(`["${filter}"]["${filter}"!~"${NEGATIVE_VALUES}"]`);
+        bareKeys.add(filter);
       }
     }
   }
 
-  // A bare-key selector already covers every `key=value` selector on the same
-  // key, so drop the redundant ones — Overpass charges for each statement.
-  const bareKeys = new Set(
-    [...selectors]
-      .map((s) => /^\["([a-z:_]+)"\]\["/.exec(s)?.[1])
-      .filter((k): k is string => Boolean(k)),
-  );
-  return [...selectors].filter((s) => {
-    const exact = /^\["([a-z:_]+)"="/.exec(s)?.[1];
-    return !exact || !bareKeys.has(exact);
-  });
+  const selectors: string[] = [];
+
+  for (const key of bareKeys) {
+    // `shop=no` marks a *former* shop, so bare keys need the negative guard.
+    selectors.push(`["${key}"]["${key}"!~"${NEGATIVE_VALUES}"]`);
+  }
+
+  for (const [key, values] of valuesByKey) {
+    // A bare-key selector already covers every value of that key.
+    if (bareKeys.has(key)) continue;
+    const sorted = [...values].sort();
+    selectors.push(
+      sorted.length === 1
+        ? `["${key}"="${sorted[0]}"]`
+        : `["${key}"~"^(${sorted.join("|")})$"]`,
+    );
+  }
+
+  return selectors.sort();
+}
+
+/**
+ * Overpass needs a self-declared timeout, and it must be lower than ours or the
+ * server keeps grinding after we have already given up on it.
+ */
+export function overpassTimeout(budgetMs: number): number {
+  return Math.max(10, Math.min(50, Math.floor(budgetMs / 1000) - 2));
 }
 
 export function buildQuery(
@@ -78,25 +105,48 @@ export function buildQuery(
   lon: number,
   radius: number,
   groups: CategoryGroup[],
+  budgetMs = 25_000,
 ): string {
   const around = `(around:${Math.round(radius)},${lat.toFixed(6)},${lon.toFixed(6)})`;
   const body = selectorsFor(groups)
     .map((sel) => `  nwr${sel}["name"]${around};`)
     .join("\n");
 
-  return `[out:json][timeout:45];\n(\n${body}\n);\nout tags center ${MAX_ELEMENTS};`;
+  return `[out:json][timeout:${overpassTimeout(budgetMs)}];\n(\n${body}\n);\nout tags center ${MAX_ELEMENTS};`;
 }
 
-async function runQuery(query: string): Promise<OverpassResponse> {
-  let lastError: Error | null = null;
+/**
+ * How long the whole search may take, across every mirror we try. It has to sit
+ * comfortably inside the serverless function's own limit: overrun it and the
+ * platform kills the request and returns its own 504, so the user gets an
+ * unexplained gateway error instead of our message.
+ */
+const TOTAL_BUDGET_MS = 45_000;
 
-  for (const endpoint of endpoints()) {
+/** Kept back so a mirror that times out cannot consume the whole budget. */
+const RESERVE_PER_ATTEMPT_MS = 8_000;
+
+async function runQuery(
+  build: (budgetMs: number) => string,
+): Promise<OverpassResponse> {
+  let lastError: Error | null = null;
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
+  const list = endpoints();
+
+  for (const [index, endpoint] of list.entries()) {
+    const remaining = deadline - Date.now();
+    const attemptsLeft = list.length - index - 1;
+    // Let this attempt use most of what is left, but keep a reserve so a
+    // mirror that hangs still leaves room to ask another one.
+    const budget = remaining - RESERVE_PER_ATTEMPT_MS * attemptsLeft;
+    if (budget < 4_000) break;
+
     try {
       const res = await fetchWithTimeout(endpoint, {
         method: "POST",
-        timeoutMs: 50_000,
+        timeoutMs: budget,
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ data: query }).toString(),
+        body: new URLSearchParams({ data: build(budget) }).toString(),
       });
 
       // A mirror that is busy (429/504), blocking us (403) or broken (5xx) is
@@ -125,9 +175,15 @@ async function runQuery(query: string): Promise<OverpassResponse> {
 
   // Keep the per-mirror detail in the logs; the user gets the plain version.
   console.warn("[overpass] all mirrors failed:", lastError?.message);
+
+  // A timeout and an outage need different advice, so tell them apart.
+  const timedOut =
+    lastError?.name === "AbortError" || /timeout|abort/i.test(lastError?.message ?? "");
   throw new UpstreamError(
-    "Every OpenStreetMap mirror we tried is unavailable right now. Give it a minute, or try a smaller radius.",
-    503,
+    timedOut
+      ? "This area is too large or too busy for the free map data service to answer in time. Zoom in, or drag the radius down, and try again."
+      : "Every OpenStreetMap mirror we tried is unavailable right now. Give it a minute and try again.",
+    timedOut ? 504 : 503,
   );
 }
 
@@ -155,7 +211,9 @@ export async function searchOsm(
     return { businesses: cached, truncated: cached.length >= MAX_ELEMENTS };
   }
 
-  const data = await runQuery(buildQuery(lat, lon, radius, groups));
+  const data = await runQuery((budgetMs) =>
+    buildQuery(lat, lon, radius, groups, budgetMs),
+  );
   const elements = data.elements ?? [];
 
   const seen = new Set<string>();
@@ -196,6 +254,6 @@ export async function fetchElementTags(
   type: "node" | "way" | "relation",
   id: number,
 ): Promise<Record<string, string>> {
-  const data = await runQuery(`[out:json][timeout:20];${type}(${id});out tags;`);
+  const data = await runQuery(() => `[out:json][timeout:20];${type}(${id});out tags;`);
   return data.elements?.[0]?.tags ?? {};
 }

@@ -2,47 +2,24 @@
 
 import L from "leaflet";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buildBasemaps } from "@/lib/basemaps";
 import type { Business } from "@/lib/types";
 
-interface Basemap {
-  id: string;
-  label: string;
-  url: string;
-  attribution: string;
-  maxZoom: number;
-  subdomains?: string;
-}
-
-const BASEMAPS: Basemap[] = [
-  {
-    id: "streets",
-    label: "Streets",
-    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    maxZoom: 20,
-    subdomains: "abcd",
-  },
-  {
-    id: "satellite",
-    label: "Satellite",
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
-    maxZoom: 19,
-  },
-  {
-    id: "dark",
-    label: "Dark",
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    maxZoom: 20,
-    subdomains: "abcd",
-  },
-];
+/**
+ * Street tiles default to OpenStreetMap's own service because it genuinely
+ * needs no key. Set NEXT_PUBLIC_CARTO_API_KEY for CARTO's styling, or
+ * NEXT_PUBLIC_TILE_URL for any other provider; nothing else has to change.
+ *
+ * These are read at build time, so changing them needs a redeploy.
+ */
+const BASEMAPS = buildBasemaps({
+  tileUrl: process.env.NEXT_PUBLIC_TILE_URL,
+  tileAttribution: process.env.NEXT_PUBLIC_TILE_ATTRIBUTION,
+  cartoApiKey: process.env.NEXT_PUBLIC_CARTO_API_KEY,
+});
 
 const MIN_RADIUS = 200;
-const MAX_RADIUS = 15_000;
+const MAX_RADIUS = 8_000;
 
 export interface MapViewProps {
   center: { lat: number; lon: number };
@@ -95,10 +72,16 @@ export default function MapView({
   const programmatic = useRef(false);
   const [moved, setMoved] = useState(false);
   const [basemapId, setBasemapId] = useState("streets");
+  const [tilesBroken, setTilesBroken] = useState(false);
 
   const selected = useMemo(
     () => businesses.find((business) => business.id === selectedId) ?? null,
     [businesses, selectedId],
+  );
+
+  const activeBasemap = useMemo(
+    () => BASEMAPS.find((b) => b.id === basemapId) ?? BASEMAPS[0],
+    [basemapId],
   );
 
   useEffect(() => {
@@ -138,15 +121,32 @@ export default function MapView({
     const map = mapRef.current;
     if (!map) return;
 
-    const basemap = BASEMAPS.find((b) => b.id === basemapId) ?? BASEMAPS[0];
+    const basemap = activeBasemap;
     tileRef.current?.remove();
-    tileRef.current = L.tileLayer(basemap.url, {
+
+    const layer = L.tileLayer(basemap.url, {
       attribution: basemap.attribution,
       maxZoom: basemap.maxZoom,
       ...(basemap.subdomains ? { subdomains: basemap.subdomains } : {}),
-    }).addTo(map);
-    tileRef.current.bringToBack();
-  }, [basemapId]);
+    });
+
+    // A basemap that refuses to serve us should say so, not leave a blank grid.
+    let loaded = 0;
+    let failed = 0;
+    setTilesBroken(false);
+    layer.on("tileload", () => {
+      loaded += 1;
+      setTilesBroken(false);
+    });
+    layer.on("tileerror", () => {
+      failed += 1;
+      if (loaded === 0 && failed >= 4) setTilesBroken(true);
+    });
+
+    layer.addTo(map);
+    layer.bringToBack();
+    tileRef.current = layer;
+  }, [activeBasemap]);
 
   // Recentre whenever a new search area arrives from outside the map.
   useEffect(() => {
@@ -252,9 +252,20 @@ export default function MapView({
       <div
         ref={containerRef}
         className="map-root"
+        data-basemap={basemapId}
+        // Only the CSS-filtered fallback gets inverted. A provider's own dark
+        // basemap is already dark; inverting it would turn it light again.
+        data-darken={activeBasemap.darken ? "true" : "false"}
         role="application"
         aria-label="Map of nearby businesses"
       />
+
+      {tilesBroken && (
+        <div className="map-tile-warning" role="status">
+          Map tiles are not loading. The rest of the app still works — results and
+          the target list are unaffected.
+        </div>
+      )}
 
       <div className="map-overlay">
         {moved && (

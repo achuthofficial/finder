@@ -81,6 +81,16 @@ This matters more than it sounds, so it is worth being blunt about it:
 
 So on the free source the brief will usually show "no photos on record" and say plainly that reviews do not exist there, rather than pretending. Everything else — the targets, the sheet, the pitch, the CSV, the PDF — works fully without any key.
 
+### Why the radius is capped at 8 km
+
+Overpass is a shared free service, and an all-categories search over a dense
+city is genuinely expensive for it. The query is built as one spatial scan per
+tag key rather than one per category value — about 7 scans instead of 44 — which
+is what makes a city-scale search viable at all. Past roughly 8 km it still
+starts timing out rather than answering, so the API clamps there and says so
+rather than handing back a gateway error. Narrower searches are also better
+leads: a 1–2 km radius is a neighbourhood you can actually walk.
+
 ### An important caveat
 
 A business flagged "no website" means **nobody has recorded one** — not that none exists. OpenStreetMap is volunteer-maintained and its contact tags are patchy in places. Every result links out to a Google search and to its source record so you can confirm before you act on it. Treat the list as a shortlist to verify, not a verified list.
@@ -170,6 +180,30 @@ Two rules the code follows:
 
 jsPDF's built-in fonts are Latin-1 only, which would turn a shop called 居酒屋 or مقهى into mojibake — not acceptable for a tool that claims to work everywhere. Rather than ship a multi-megabyte Unicode font, `lib/pdf.ts` detects text outside Latin-1 and renders just those runs through a canvas using the fonts the browser already has, on an opaque background so jsPDF stores one compressed bitmap instead of a bitmap plus a soft mask.
 
+## Basemaps
+
+The street and dark styles use **OpenStreetMap's own tile service**, and satellite uses **Esri World Imagery**. Both are keyless, which keeps the no-configuration promise intact. The dark style is the street tiles put through a CSS filter rather than a second provider, so switching styles costs no extra requests.
+
+This was not the original choice: it used CARTO's basemaps, which stopped serving anonymous requests and started returning an "API key required" tile, so the map broke on the deployed app while everything else kept working. Keyless providers are the ones that cannot break that way.
+
+### Better-looking tiles
+
+OSM's [tile usage policy](https://operations.osmfoundation.org/policies/tiles/) asks that heavy applications not lean on their volunteer-funded service, and CARTO's styling is nicer anyway. Two ways to upgrade, neither of which needs a code change:
+
+| Variable | Effect |
+| --- | --- |
+| `NEXT_PUBLIC_CARTO_API_KEY` | Street and dark styles switch to CARTO, and dark becomes a real dark basemap rather than the CSS-filtered fallback. Free to 5M tiles/month. |
+| `NEXT_PUBLIC_TILE_URL` + `NEXT_PUBLIC_TILE_ATTRIBUTION` | Any other provider — MapTiler, Stadia, your own tile server. Wins over the CARTO key. |
+
+Satellite stays on Esri either way.
+
+**These keys are public.** Anything named `NEXT_PUBLIC_*` is compiled into the JavaScript the browser downloads, and a tile key has to reach the browser regardless, since that is what fetches the tiles. So:
+
+- Set it in your host's environment variables, never in the repository.
+- Restrict the key to your domain in the provider's dashboard. That, not secrecy, is what stops someone else spending your quota.
+
+Changing these needs a redeploy, because they are inlined at build time.
+
 ## Attribution
 
-Business and place data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL). Base map tiles © [CARTO](https://carto.com/attributions).
+Business and place data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL). Street tiles © OpenStreetMap contributors; satellite imagery © Esri, Maxar, Earthstar Geographics.

@@ -116,8 +116,28 @@ export default function Finder({ googleAvailable }: { googleAvailable: boolean }
 
     fetch(`/api/search?${params}`, { signal: controller.signal })
       .then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error ?? "Search failed.");
+        // A gateway timeout comes back as HTML, not JSON, so parsing it first
+        // would replace a useful message with a syntax error.
+        const body = await response.text();
+        let payload: unknown = null;
+        try {
+          payload = JSON.parse(body);
+        } catch {
+          payload = null;
+        }
+
+        if (!response.ok) {
+          const fromApi =
+            payload && typeof payload === "object" && "error" in payload
+              ? String((payload as { error: unknown }).error)
+              : null;
+          throw new Error(
+            fromApi ??
+              (response.status === 504 || response.status === 502
+                ? "The search took too long. Try a smaller radius, or zoom in and search that area."
+                : `Search failed (${response.status}).`),
+          );
+        }
         return payload as SearchResponse;
       })
       .then((payload) => {
@@ -537,6 +557,8 @@ export default function Finder({ googleAvailable }: { googleAvailable: boolean }
 
           <div className="results" ref={resultsRef}>
             {error && <div className="notice error">{error}</div>}
+
+            {!error && data?.notice && <div className="notice">{data.notice}</div>}
 
             {!error && data?.truncated && (
               <div className="notice">
