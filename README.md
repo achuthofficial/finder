@@ -81,6 +81,16 @@ This matters more than it sounds, so it is worth being blunt about it:
 
 So on the free source the brief will usually show "no photos on record" and say plainly that reviews do not exist there, rather than pretending. Everything else — the targets, the sheet, the pitch, the CSV, the PDF — works fully without any key.
 
+### Why the radius is capped at 8 km
+
+Overpass is a shared free service, and an all-categories search over a dense
+city is genuinely expensive for it. The query is built as one spatial scan per
+tag key rather than one per category value — about 7 scans instead of 44 — which
+is what makes a city-scale search viable at all. Past roughly 8 km it still
+starts timing out rather than answering, so the API clamps there and says so
+rather than handing back a gateway error. Narrower searches are also better
+leads: a 1–2 km radius is a neighbourhood you can actually walk.
+
 ### An important caveat
 
 A business flagged "no website" means **nobody has recorded one** — not that none exists. OpenStreetMap is volunteer-maintained and its contact tags are patchy in places. Every result links out to a Google search and to its source record so you can confirm before you act on it. Treat the list as a shortlist to verify, not a verified list.

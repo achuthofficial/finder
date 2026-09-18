@@ -42,7 +42,7 @@ const BASEMAPS: Basemap[] = [
 ];
 
 const MIN_RADIUS = 200;
-const MAX_RADIUS = 15_000;
+const MAX_RADIUS = 8_000;
 
 export interface MapViewProps {
   center: { lat: number; lon: number };
