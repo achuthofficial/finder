@@ -1344,7 +1344,7 @@ a {
  * tile provider. Only the tile pane is affected, so markers, the radius circle
  * and the controls keep their real colours.
  */
-.map-root[data-basemap="dark"] .leaflet-tile-pane {
+.map-root[data-darken="true"] .leaflet-tile-pane {
   filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.8);
 }
 

@@ -42,7 +42,10 @@ test("dark reuses the street tiles instead of fetching a second set", () => {
 
 test("an override redirects the street and dark styles but not satellite", () => {
   const custom = "https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key=abc";
-  const [streets, satellite, dark] = buildBasemaps(custom, "© MapTiler");
+  const [streets, satellite, dark] = buildBasemaps({
+    tileUrl: custom,
+    tileAttribution: "© MapTiler",
+  });
 
   assert.equal(streets.url, custom);
   assert.equal(dark.url, custom);
@@ -53,7 +56,42 @@ test("an override redirects the street and dark styles but not satellite", () =>
 });
 
 test("an empty override falls back rather than producing a blank map", () => {
-  assert.equal(buildBasemaps("", "").length, 3);
-  assert.ok(buildBasemaps("", "")[0].url.includes("tile.openstreetmap.org"));
-  assert.ok(buildBasemaps("", "")[0].attribution.includes("OpenStreetMap"));
+  const blank = buildBasemaps({ tileUrl: "", tileAttribution: "", cartoApiKey: "  " });
+  assert.equal(blank.length, 3);
+  assert.ok(blank[0].url.includes("tile.openstreetmap.org"));
+  assert.ok(blank[0].attribution.includes("OpenStreetMap"));
+});
+
+test("a CARTO key switches the street and dark styles to CARTO", () => {
+  const [streets, satellite, dark] = buildBasemaps({ cartoApiKey: "test-key-123" });
+
+  assert.ok(streets.url.startsWith("https://basemaps.cartocdn.com/rastertiles/voyager/"));
+  assert.ok(streets.url.endsWith("?key=test-key-123"));
+
+  // With CARTO available, dark is a real dark basemap, not inverted tiles.
+  assert.ok(dark.url.includes("/dark_all/"));
+  assert.ok(!dark.darken, "CARTO dark should not also be CSS-inverted");
+
+  // Satellite stays on Esri; CARTO has no imagery layer here.
+  assert.ok(satellite.url.includes("arcgisonline.com"));
+});
+
+test("CARTO's attribution requirement is honoured", () => {
+  // Their terms require the CARTO and OpenStreetMap credits stay visible.
+  const [streets] = buildBasemaps({ cartoApiKey: "test-key-123" });
+  assert.match(streets.attribution, /OpenStreetMap/);
+  assert.match(streets.attribution, /CARTO/);
+});
+
+test("a key with URL-unsafe characters is encoded, not pasted raw", () => {
+  const [streets] = buildBasemaps({ cartoApiKey: "a b&c=d" });
+  assert.ok(streets.url.endsWith("?key=a%20b%26c%3Dd"));
+});
+
+test("an explicit tile URL still beats a CARTO key", () => {
+  const custom = "https://tiles.example.com/{z}/{x}/{y}.png";
+  const [streets, , dark] = buildBasemaps({ tileUrl: custom, cartoApiKey: "test-key-123" });
+  assert.equal(streets.url, custom);
+  assert.equal(dark.url, custom);
+  assert.equal(dark.darken, true);
 });

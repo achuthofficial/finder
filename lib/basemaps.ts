@@ -48,20 +48,57 @@ export function needsApiKey(url: string): boolean {
   }
 }
 
+const CARTO_ATTRIBUTION = `${OSM_ATTRIBUTION} &copy; <a href="https://carto.com/attributions">CARTO</a>`;
+
+export interface BasemapOptions {
+  /** Full tile URL template. Wins over everything else. */
+  tileUrl?: string;
+  tileAttribution?: string;
+  /** A CARTO Basemaps key switches the street and dark styles to CARTO. */
+  cartoApiKey?: string;
+}
+
+function cartoUrl(style: string, apiKey: string): string {
+  return `https://basemaps.cartocdn.com/${style}/{z}/{x}/{y}.png?key=${encodeURIComponent(apiKey)}`;
+}
+
 /**
- * Build the basemap list. The street tiles can be pointed at a commercial
- * provider through the environment; the dark style is those same tiles behind a
- * CSS filter, so switching styles costs no extra requests.
+ * Build the basemap list.
+ *
+ * Three tiers, in order: an explicit tile URL for full control, a CARTO key for
+ * their nicer styling, and otherwise OpenStreetMap's keyless service so the app
+ * always has a working map with no configuration at all.
  */
-export function buildBasemaps(
-  tileUrl?: string,
-  tileAttribution?: string,
-): Basemap[] {
-  const street = tileUrl || OSM_TILES;
-  const attribution = tileAttribution || OSM_ATTRIBUTION;
+export function buildBasemaps(options: BasemapOptions = {}): Basemap[] {
+  const cartoKey = options.cartoApiKey?.trim();
+  const explicit = options.tileUrl?.trim();
+
+  const street = explicit || (cartoKey ? cartoUrl("rastertiles/voyager", cartoKey) : OSM_TILES);
+  const attribution =
+    options.tileAttribution?.trim() ||
+    (explicit ? OSM_ATTRIBUTION : cartoKey ? CARTO_ATTRIBUTION : OSM_ATTRIBUTION);
+
+  // With CARTO available, dark is a real dark basemap rather than the street
+  // tiles inverted in CSS — genuinely better, and it costs nothing extra.
+  const dark: Basemap =
+    !explicit && cartoKey
+      ? {
+          id: "dark",
+          label: "Dark",
+          url: cartoUrl("dark_all", cartoKey),
+          attribution,
+          maxZoom: 20,
+        }
+      : { id: "dark", label: "Dark", url: street, attribution, maxZoom: 19, darken: true };
 
   return [
-    { id: "streets", label: "Streets", url: street, attribution, maxZoom: 19 },
+    {
+      id: "streets",
+      label: "Streets",
+      url: street,
+      attribution,
+      maxZoom: !explicit && cartoKey ? 20 : 19,
+    },
     {
       id: "satellite",
       label: "Satellite",
@@ -69,13 +106,6 @@ export function buildBasemaps(
       attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
       maxZoom: 19,
     },
-    {
-      id: "dark",
-      label: "Dark",
-      url: street,
-      attribution,
-      maxZoom: 19,
-      darken: true,
-    },
+    dark,
   ];
 }

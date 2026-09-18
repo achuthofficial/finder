@@ -7,13 +7,16 @@ import type { Business } from "@/lib/types";
 
 /**
  * Street tiles default to OpenStreetMap's own service because it genuinely
- * needs no key. Set NEXT_PUBLIC_TILE_URL (and NEXT_PUBLIC_TILE_ATTRIBUTION) to
- * use a commercial provider instead; nothing else has to change.
+ * needs no key. Set NEXT_PUBLIC_CARTO_API_KEY for CARTO's styling, or
+ * NEXT_PUBLIC_TILE_URL for any other provider; nothing else has to change.
+ *
+ * These are read at build time, so changing them needs a redeploy.
  */
-const BASEMAPS = buildBasemaps(
-  process.env.NEXT_PUBLIC_TILE_URL,
-  process.env.NEXT_PUBLIC_TILE_ATTRIBUTION,
-);
+const BASEMAPS = buildBasemaps({
+  tileUrl: process.env.NEXT_PUBLIC_TILE_URL,
+  tileAttribution: process.env.NEXT_PUBLIC_TILE_ATTRIBUTION,
+  cartoApiKey: process.env.NEXT_PUBLIC_CARTO_API_KEY,
+});
 
 const MIN_RADIUS = 200;
 const MAX_RADIUS = 8_000;
@@ -76,6 +79,11 @@ export default function MapView({
     [businesses, selectedId],
   );
 
+  const activeBasemap = useMemo(
+    () => BASEMAPS.find((b) => b.id === basemapId) ?? BASEMAPS[0],
+    [basemapId],
+  );
+
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -113,7 +121,7 @@ export default function MapView({
     const map = mapRef.current;
     if (!map) return;
 
-    const basemap = BASEMAPS.find((b) => b.id === basemapId) ?? BASEMAPS[0];
+    const basemap = activeBasemap;
     tileRef.current?.remove();
 
     const layer = L.tileLayer(basemap.url, {
@@ -138,7 +146,7 @@ export default function MapView({
     layer.addTo(map);
     layer.bringToBack();
     tileRef.current = layer;
-  }, [basemapId]);
+  }, [activeBasemap]);
 
   // Recentre whenever a new search area arrives from outside the map.
   useEffect(() => {
@@ -245,6 +253,9 @@ export default function MapView({
         ref={containerRef}
         className="map-root"
         data-basemap={basemapId}
+        // Only the CSS-filtered fallback gets inverted. A provider's own dark
+        // basemap is already dark; inverting it would turn it light again.
+        data-darken={activeBasemap.darken ? "true" : "false"}
         role="application"
         aria-label="Map of nearby businesses"
       />

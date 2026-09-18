@@ -186,7 +186,23 @@ The street and dark styles use **OpenStreetMap's own tile service**, and satelli
 
 This was not the original choice: it used CARTO's basemaps, which stopped serving anonymous requests and started returning an "API key required" tile, so the map broke on the deployed app while everything else kept working. Keyless providers are the ones that cannot break that way.
 
-If you expect real traffic, point `NEXT_PUBLIC_TILE_URL` and `NEXT_PUBLIC_TILE_ATTRIBUTION` at a commercial provider (CARTO with a key, MapTiler, Stadia). OSM's [tile usage policy](https://operations.osmfoundation.org/policies/tiles/) asks that heavy applications not lean on their volunteer-funded service.
+### Better-looking tiles
+
+OSM's [tile usage policy](https://operations.osmfoundation.org/policies/tiles/) asks that heavy applications not lean on their volunteer-funded service, and CARTO's styling is nicer anyway. Two ways to upgrade, neither of which needs a code change:
+
+| Variable | Effect |
+| --- | --- |
+| `NEXT_PUBLIC_CARTO_API_KEY` | Street and dark styles switch to CARTO, and dark becomes a real dark basemap rather than the CSS-filtered fallback. Free to 5M tiles/month. |
+| `NEXT_PUBLIC_TILE_URL` + `NEXT_PUBLIC_TILE_ATTRIBUTION` | Any other provider — MapTiler, Stadia, your own tile server. Wins over the CARTO key. |
+
+Satellite stays on Esri either way.
+
+**These keys are public.** Anything named `NEXT_PUBLIC_*` is compiled into the JavaScript the browser downloads, and a tile key has to reach the browser regardless, since that is what fetches the tiles. So:
+
+- Set it in your host's environment variables, never in the repository.
+- Restrict the key to your domain in the provider's dashboard. That, not secrecy, is what stops someone else spending your quota.
+
+Changing these needs a redeploy, because they are inlined at build time.
 
 ## Attribution
 
