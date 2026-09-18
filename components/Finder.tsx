@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GROUPS } from "@/lib/categories";
 import { downloadCsv } from "@/lib/csv";
 import { distanceMetres, formatRadius } from "@/lib/geo";
+import { useTargets } from "@/lib/targets";
 import type {
   Business,
   CategoryGroup,
@@ -13,11 +14,15 @@ import type {
   WebPresence,
 } from "@/lib/types";
 import ResultCard from "./ResultCard";
+import StoreDetail from "./StoreDetail";
+import TargetsSheet from "./TargetsSheet";
 
 const MapView = dynamic(() => import("./MapView"), {
   ssr: false,
   loading: () => <div className="map-pane" />,
 });
+
+const SENDER_KEY = "finder.sender.v1";
 
 type PresenceFilter = "all" | WebPresence;
 type SortKey = "score" | "distance" | "name";
@@ -62,6 +67,16 @@ export default function Finder({ googleAvailable }: { googleAvailable: boolean }
   const [mobileView, setMobileView] = useState<"list" | "map">("list");
   /** Blocks the first fetch until a shared link (if any) has been restored. */
   const [ready, setReady] = useState(false);
+
+  const { targets, remove, toggle, addMany, update, clear } = useTargets();
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [detailFor, setDetailFor] = useState<Business | null>(null);
+  const [senderName, setSenderName] = useState("");
+
+  const targetIds = useMemo(
+    () => new Set(targets.map((target) => target.business.id)),
+    [targets],
+  );
 
   const requestRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLDivElement | null>(null);
@@ -141,6 +156,38 @@ export default function Finder({ googleAvailable }: { googleAvailable: boolean }
     }, 450);
     return () => clearTimeout(timer);
   }, [radiusDraft, area.radius]);
+
+  // Remember how the freelancer signs their messages between sessions.
+  useEffect(() => {
+    try {
+      setSenderName(window.localStorage.getItem(SENDER_KEY) ?? "");
+    } catch {
+      // Private mode: the field simply starts empty each time.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      window.localStorage.setItem(SENDER_KEY, senderName);
+    } catch {
+      // Nothing to do; the value still applies for this session.
+    }
+  }, [senderName, ready]);
+
+  // Selecting a marker should bring its row into view in the list.
+  useEffect(() => {
+    if (!selectedId) return;
+    document
+      .getElementById(`result-${CSS.escape(selectedId)}`)
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selectedId]);
+
+  const openDetails = useCallback((business: Business) => {
+    setDetailFor(business);
+    setSelectedId(business.id);
+    setSheetOpen(false);
+  }, []);
 
   // --------------------------------------------------------------- geocode --
 
@@ -289,6 +336,15 @@ export default function Finder({ googleAvailable }: { googleAvailable: boolean }
           Local businesses anywhere on Earth — flagged by who has no website
         </span>
         <span className="spacer" />
+        <button
+          type="button"
+          className="targets-button"
+          onClick={() => setSheetOpen(true)}
+          aria-label={`Open target list, ${targets.length} saved`}
+        >
+          Targets
+          <span className="count">{targets.length}</span>
+        </button>
         <div className="source-switch" role="group" aria-label="Data source">
           <button
             type="button"
@@ -459,6 +515,15 @@ export default function Finder({ googleAvailable }: { googleAvailable: boolean }
               type="button"
               className="link-button"
               disabled={!visible.length}
+              onClick={() => addMany(visibleBusinesses)}
+              title="Add every business currently shown to the target list"
+            >
+              Target all
+            </button>
+            <button
+              type="button"
+              className="link-button"
+              disabled={!visible.length}
               onClick={() =>
                 downloadCsv(
                   visibleBusinesses,
@@ -517,13 +582,17 @@ export default function Finder({ googleAvailable }: { googleAvailable: boolean }
             )}
 
             {visible.map(({ business, distance }) => (
-              <ResultCard
-                key={business.id}
-                business={business}
-                distance={distance}
-                selected={business.id === selectedId}
-                onSelect={setSelectedId}
-              />
+              <div key={business.id} id={`result-${business.id}`}>
+                <ResultCard
+                  business={business}
+                  distance={distance}
+                  selected={business.id === selectedId}
+                  isTarget={targetIds.has(business.id)}
+                  onSelect={setSelectedId}
+                  onToggleTarget={toggle}
+                  onOpenDetails={openDetails}
+                />
+              </div>
             ))}
 
             {!loading && visible.length > 0 && (
@@ -542,12 +611,23 @@ export default function Finder({ googleAvailable }: { googleAvailable: boolean }
           radius={area.radius}
           businesses={visibleBusinesses}
           selectedId={selectedId}
-          onSelect={(id) => {
-            setSelectedId(id);
-            setMobileView("list");
-          }}
+          targetIds={targetIds}
+          onSelect={setSelectedId}
+          onToggleTarget={toggle}
+          onOpenDetails={openDetails}
           onSearchArea={searchArea}
         />
+
+        {detailFor && (
+          <StoreDetail
+            business={detailFor}
+            isTarget={targetIds.has(detailFor.id)}
+            senderName={senderName}
+            onSenderName={setSenderName}
+            onToggleTarget={toggle}
+            onClose={() => setDetailFor(null)}
+          />
+        )}
       </div>
 
       <nav className="mobile-tabs">
@@ -565,7 +645,23 @@ export default function Finder({ googleAvailable }: { googleAvailable: boolean }
         >
           Map
         </button>
+        <button type="button" onClick={() => setSheetOpen(true)}>
+          Targets ({targets.length})
+        </button>
       </nav>
+
+      {sheetOpen && (
+        <TargetsSheet
+          targets={targets}
+          senderName={senderName}
+          onSenderName={setSenderName}
+          onUpdate={update}
+          onRemove={remove}
+          onClear={clear}
+          onOpen={(target) => openDetails(target.business)}
+          onClose={() => setSheetOpen(false)}
+        />
+      )}
     </div>
   );
 }

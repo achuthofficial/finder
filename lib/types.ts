@@ -24,6 +24,36 @@ export interface Business {
   leadScore: number;
   /** Deep link to the source record, for verification. */
   sourceUrl: string;
+  /** True when the source can supply photos/reviews via /api/place. */
+  hasDetails: boolean;
+}
+
+export interface Photo {
+  url: string;
+  /** Same image proxied through our origin, so it is CORS-safe and downloadable. */
+  proxyUrl: string;
+  width?: number;
+  height?: number;
+  attribution?: string;
+  licence?: string;
+}
+
+export interface Review {
+  author: string;
+  rating: number;
+  text: string;
+  relativeTime?: string;
+  profileUrl?: string;
+}
+
+export interface PlaceDetails {
+  id: string;
+  photos: Photo[];
+  reviews: Review[];
+  rating?: number;
+  reviewCount?: number;
+  /** Why a section is empty, when it is — shown verbatim in the UI. */
+  notes: { photos?: string; reviews?: string };
 }
 
 export interface SearchStats {
@@ -68,4 +98,14 @@ export interface GeocodeResult {
   /** Suggested search radius in metres, derived from the feature's extent. */
   suggestedRadius: number;
   type?: string;
+}
+
+export type TargetStatus = "new" | "contacted" | "replied" | "quoted" | "won" | "lost";
+
+export interface Target {
+  business: Business;
+  status: TargetStatus;
+  notes: string;
+  /** ms epoch, for "added" ordering. */
+  addedAt: number;
 }

@@ -54,6 +54,7 @@ const sample: Business = {
   presence: "none",
   leadScore: 88,
   sourceUrl: "https://www.openstreetmap.org/node/1",
+  hasDetails: false,
 };
 
 test("CSV quotes embedded quotes and keeps a header row", () => {

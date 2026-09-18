@@ -12,6 +12,7 @@
     "test": "tsc -p tsconfig.test.json && node --test \".test-build/tests/**/*.test.js\""
   },
   "dependencies": {
+    "jspdf": "^4.2.1",
     "leaflet": "^1.9.4",
     "next": "^15.5.4",
     "react": "^19.1.1",

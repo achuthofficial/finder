@@ -14,15 +14,21 @@ const PRESENCE_BADGE: Record<Business["presence"], { className: string; label: s
 export interface ResultCardProps {
   business: Business;
   selected: boolean;
+  isTarget: boolean;
   distance?: number;
   onSelect: (id: string | null) => void;
+  onToggleTarget: (business: Business) => void;
+  onOpenDetails: (business: Business) => void;
 }
 
 export default function ResultCard({
   business,
   selected,
+  isTarget,
   distance,
   onSelect,
+  onToggleTarget,
+  onOpenDetails,
 }: ResultCardProps) {
   const [copied, setCopied] = useState(false);
   const badge = PRESENCE_BADGE[business.presence];
@@ -64,6 +70,23 @@ export default function ResultCard({
         <span className="score" title="Lead score: how worth contacting this business is">
           {business.leadScore}
         </span>
+        <button
+          type="button"
+          className="target-toggle"
+          aria-pressed={isTarget}
+          title={isTarget ? "Remove from target list" : "Add to target list"}
+          aria-label={
+            isTarget
+              ? `Remove ${business.name} from target list`
+              : `Add ${business.name} to target list`
+          }
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleTarget(business);
+          }}
+        >
+          {isTarget ? "✓" : "+"}
+        </button>
       </div>
 
       <div className="result-meta">
@@ -131,6 +154,9 @@ export default function ResultCard({
           )}
 
           <div className="actions">
+            <button type="button" onClick={() => onOpenDetails(business)}>
+              Open brief
+            </button>
             <a
               href={`https://www.google.com/search?q=${encodeURIComponent(
                 `${business.name} ${business.address ?? ""}`.trim(),

@@ -123,6 +123,7 @@ function toBusiness(place: GooglePlace, group: CategoryGroup): Business[] {
       }),
       sourceUrl:
         place.googleMapsUri ?? `https://www.google.com/maps/place/?q=place_id:${place.id}`,
+      hasDetails: true,
     },
   ];
 }

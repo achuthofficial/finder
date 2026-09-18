@@ -190,3 +190,12 @@ export async function searchOsm(
 }
 
 export { scoreLead };
+
+/** Fetch the tags of a single element, for the detail view. */
+export async function fetchElementTags(
+  type: "node" | "way" | "relation",
+  id: number,
+): Promise<Record<string, string>> {
+  const data = await runQuery(`[out:json][timeout:20];${type}(${id});out tags;`);
+  return data.elements?.[0]?.tags ?? {};
+}

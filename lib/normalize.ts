@@ -232,6 +232,11 @@ export function toBusiness(
   const email = firstOf(tags, ["email", "contact:email"]);
   const address = formatAddress(tags);
   const isChain = Boolean(tags.brand || tags["brand:wikidata"]);
+  // OSM has no reviews, and photos only exist when the record links out to
+  // Wikimedia — so only offer the details view when there is something to show.
+  const hasDetails = Boolean(
+    tags.image || tags.wikimedia_commons || tags.wikidata || tags["brand:wikidata"],
+  );
 
   let category = classified.category;
   const cuisine = tags.cuisine?.split(";")[0];
@@ -262,5 +267,6 @@ export function toBusiness(
       isChain,
     }),
     sourceUrl: `https://www.openstreetmap.org/${type}/${id}`,
+    hasDetails,
   };
 }
