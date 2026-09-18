@@ -180,6 +180,14 @@ Two rules the code follows:
 
 jsPDF's built-in fonts are Latin-1 only, which would turn a shop called 居酒屋 or مقهى into mojibake — not acceptable for a tool that claims to work everywhere. Rather than ship a multi-megabyte Unicode font, `lib/pdf.ts` detects text outside Latin-1 and renders just those runs through a canvas using the fonts the browser already has, on an opaque background so jsPDF stores one compressed bitmap instead of a bitmap plus a soft mask.
 
+## Basemaps
+
+The street and dark styles use **OpenStreetMap's own tile service**, and satellite uses **Esri World Imagery**. Both are keyless, which keeps the no-configuration promise intact. The dark style is the street tiles put through a CSS filter rather than a second provider, so switching styles costs no extra requests.
+
+This was not the original choice: it used CARTO's basemaps, which stopped serving anonymous requests and started returning an "API key required" tile, so the map broke on the deployed app while everything else kept working. Keyless providers are the ones that cannot break that way.
+
+If you expect real traffic, point `NEXT_PUBLIC_TILE_URL` and `NEXT_PUBLIC_TILE_ATTRIBUTION` at a commercial provider (CARTO with a key, MapTiler, Stadia). OSM's [tile usage policy](https://operations.osmfoundation.org/policies/tiles/) asks that heavy applications not lean on their volunteer-funded service.
+
 ## Attribution
 
-Business and place data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL). Base map tiles © [CARTO](https://carto.com/attributions).
+Business and place data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL). Street tiles © OpenStreetMap contributors; satellite imagery © Esri, Maxar, Earthstar Geographics.
